@@ -51,7 +51,7 @@ const Login: React.FC = () => {
             <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60 tracking-tight">
               FixMyHostel
             </h1>
-            <p className="text-white/40 mt-1">Modern Hostel Management</p>
+            <p className="text-white/40 mt-1">Next-Gen Hostel Living</p>
           </div>
 
           <div className="flex p-1 bg-white/5 rounded-xl mb-6">
