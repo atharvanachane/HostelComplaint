@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
+import api from '../lib/api';
 
 export type Status = 'Pending' | 'In Progress' | 'Resolved';
 export type Category = 'WiFi' | 'Water' | 'Electricity' | 'Food' | 'Cleaning' | 'Other';
@@ -8,6 +9,8 @@ export interface Complaint {
   id: string;
   userId: string;
   userName: string;
+  userEmail?: string;
+  userRoom?: string;
   title: string;
   description: string;
   category: Category;
@@ -20,106 +23,106 @@ interface ComplaintContextType {
   addComplaint: (complaint: Omit<Complaint, 'id' | 'userId' | 'userName' | 'status' | 'createdAt'>) => Promise<void>;
   updateStatus: (id: string, status: Status) => Promise<void>;
   deleteComplaint: (id: string) => Promise<void>;
+  refreshComplaints: () => Promise<void>;
   isLoading: boolean;
 }
 
 const ComplaintContext = createContext<ComplaintContextType | undefined>(undefined);
 
-const MOCK_COMPLAINTS: Complaint[] = [
-  {
-    id: '1',
-    userId: 'u1',
-    userName: 'John Doe',
-    title: 'WiFi not working in Room 302',
-    description: 'The router seems to be down since morning. No connection even after restarting.',
-    category: 'WiFi',
-    status: 'Pending',
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: '2',
-    userId: 'u2',
-    userName: 'Jane Smith',
-    title: 'Water leakage in bathroom',
-    description: 'The tap in the 2nd floor bathroom is leaking continuously.',
-    category: 'Water',
-    status: 'In Progress',
-    createdAt: new Date(Date.now() - 86400000).toISOString()
-  },
-  {
-    id: '3',
-    userId: 'u1',
-    userName: 'John Doe',
-    title: 'Electricity issue',
-    description: 'The lights are flickering in the study room.',
-    category: 'Electricity',
-    status: 'Resolved',
-    createdAt: new Date(Date.now() - 172800000).toISOString()
-  }
-];
+// Transform backend complaint data to frontend format
+const transformComplaint = (item: any): Complaint => ({
+  id: item._id,
+  userId: item.userId?._id || item.userId,
+  userName: item.userId?.name || 'Unknown',
+  userEmail: item.userId?.email || '',
+  userRoom: item.userId?.roomNumber || '',
+  title: item.title,
+  description: item.description,
+  category: item.category,
+  status: item.status,
+  createdAt: item.createdAt,
+});
 
 export const ComplaintProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { user } = useAuth();
 
-  useEffect(() => {
-    // Mock fetch
-    const fetchComplaints = async () => {
-      setIsLoading(true);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const saved = localStorage.getItem('complaints');
-      if (saved) {
-        setComplaints(JSON.parse(saved));
-      } else {
-        setComplaints(MOCK_COMPLAINTS);
-        localStorage.setItem('complaints', JSON.stringify(MOCK_COMPLAINTS));
-      }
+  // Fetch complaints from the backend API
+  const fetchComplaints = useCallback(async () => {
+    if (!user) {
+      setComplaints([]);
       setIsLoading(false);
-    };
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await api.get('/complaints');
+      const data = response.data.map(transformComplaint);
+      setComplaints(data);
+    } catch (error) {
+      console.error('Error fetching complaints:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user]);
+
+  // Fetch on mount and when user changes
+  useEffect(() => {
     fetchComplaints();
-  }, []);
+  }, [fetchComplaints]);
 
   const addComplaint = async (data: any) => {
     if (!user) return;
     setIsLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    const newComplaint: Complaint = {
-      id: Math.random().toString(36).substr(2, 9),
-      userId: user.id,
-      userName: user.name,
-      status: 'Pending',
-      createdAt: new Date().toISOString(),
-      ...data
-    };
-
-    const updated = [newComplaint, ...complaints];
-    setComplaints(updated);
-    localStorage.setItem('complaints', JSON.stringify(updated));
-    setIsLoading(false);
+    try {
+      const response = await api.post('/complaints', {
+        title: data.title,
+        description: data.description,
+        category: data.category,
+      });
+      const newComplaint = transformComplaint(response.data);
+      setComplaints((prev) => [newComplaint, ...prev]);
+    } catch (error) {
+      console.error('Error creating complaint:', error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const updateStatus = async (id: string, status: Status) => {
     setIsLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 800));
-    const updated = complaints.map(c => c.id === id ? { ...c, status } : c);
-    setComplaints(updated);
-    localStorage.setItem('complaints', JSON.stringify(updated));
-    setIsLoading(false);
+    try {
+      const response = await api.put(`/complaints/${id}`, { status });
+      const updatedComplaint = transformComplaint(response.data);
+      setComplaints((prev) =>
+        prev.map((c) => (c.id === id ? updatedComplaint : c))
+      );
+    } catch (error) {
+      console.error('Error updating complaint:', error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const deleteComplaint = async (id: string) => {
     setIsLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 800));
-    const updated = complaints.filter(c => c.id !== id);
-    setComplaints(updated);
-    localStorage.setItem('complaints', JSON.stringify(updated));
-    setIsLoading(false);
+    try {
+      await api.delete(`/complaints/${id}`);
+      setComplaints((prev) => prev.filter((c) => c.id !== id));
+    } catch (error) {
+      console.error('Error deleting complaint:', error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <ComplaintContext.Provider value={{ complaints, addComplaint, updateStatus, deleteComplaint, isLoading }}>
+    <ComplaintContext.Provider value={{ complaints, addComplaint, updateStatus, deleteComplaint, refreshComplaints: fetchComplaints, isLoading }}>
       {children}
     </ComplaintContext.Provider>
   );
